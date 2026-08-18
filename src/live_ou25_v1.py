@@ -1,4 +1,5 @@
 import time
+from io import StringIO
 from pathlib import Path
 
 import numpy as np
@@ -12,8 +13,10 @@ OUTPUT_FILE = PROJECT_ROOT / "data" / "allsvenskan_live_ou25.csv"
 ENV_FILE = PROJECT_ROOT / ".env"
 
 TOURNAMENT_ID = 40
+FOOTBALL_DATA_URL = "https://www.football-data.co.uk/new/SWE.csv"
+
 # API-budgetläge: använd bara Bet365 i den normala livekörningen.
-# Det ger 2 API-anrop per körning totalt: 1 fixtures + 1 odds.
+# Det ger 2 OddsPapi-anrop per körning totalt: 1 fixtures + 1 odds.
 BOOKMAKERS = ["bet365"]
 MARKET_OU25 = "1010"
 
@@ -58,6 +61,88 @@ def read_api_key() -> str:
                     return value
 
     raise RuntimeError("Kunde inte läsa ODDSPAPI_API_KEY från .env")
+
+
+def update_history_from_football_data() -> int:
+    """Append newly completed 2026 Allsvenskan matches to local history.
+
+    This uses Football-Data's public Sweden CSV and therefore consumes no
+    OddsPapi quota. Existing historical rows are left untouched.
+    """
+    if not HISTORY_FILE.exists():
+        raise RuntimeError(
+            f"Saknar historikfilen {HISTORY_FILE}. "
+            "Kopiera in data/allsvenskan_raw.csv först."
+        )
+
+    try:
+        response = requests.get(FOOTBALL_DATA_URL, timeout=30)
+        response.raise_for_status()
+        fresh = pd.read_csv(StringIO(response.text))
+    except Exception as exc:
+        print(f"Historikuppdatering hoppades över: {exc}")
+        return 0
+
+    required = {"League", "Season", "Date", "Home", "Away", "HG", "AG"}
+    if not required.issubset(fresh.columns):
+        print("Historikuppdatering hoppades över: oväntade kolumner i SWE.csv")
+        return 0
+
+    fresh = fresh[
+        (fresh["League"] == "Allsvenskan")
+        & (pd.to_numeric(fresh["Season"], errors="coerce") == 2026)
+    ].copy()
+
+    fresh["HG"] = pd.to_numeric(fresh["HG"], errors="coerce")
+    fresh["AG"] = pd.to_numeric(fresh["AG"], errors="coerce")
+    fresh = fresh.dropna(subset=["HG", "AG"])
+
+    if fresh.empty:
+        print("Historikuppdatering: inga färdigspelade 2026-matcher hittades")
+        return 0
+
+    existing = pd.read_csv(HISTORY_FILE)
+    key_cols = ["Season", "Date", "Home", "Away"]
+
+    existing_keys = set(
+        existing[key_cols]
+        .astype(str)
+        .agg("|".join, axis=1)
+    )
+
+    fresh["_key"] = (
+        fresh[key_cols]
+        .astype(str)
+        .agg("|".join, axis=1)
+    )
+    new_rows = fresh[~fresh["_key"].isin(existing_keys)].drop(columns="_key")
+
+    if new_rows.empty:
+        print("Historikuppdatering: 0 nya matcher")
+        return 0
+
+    # Anpassa till den befintliga filens schema. Odds- eller övriga kolumner
+    # som saknas i den färska filen lämnas tomma; mål/resultat räcker för
+    # form- och målmodellen.
+    all_columns = list(existing.columns)
+    for column in new_rows.columns:
+        if column not in all_columns:
+            all_columns.append(column)
+
+    existing = existing.reindex(columns=all_columns)
+    new_rows = new_rows.reindex(columns=all_columns)
+
+    updated = pd.concat([existing, new_rows], ignore_index=True)
+    updated["_sort_dt"] = pd.to_datetime(
+        updated["Date"].astype(str) + " " + updated["Time"].fillna("12:00"),
+        dayfirst=True,
+        errors="coerce",
+    )
+    updated = updated.sort_values("_sort_dt").drop(columns="_sort_dt")
+    updated.to_csv(HISTORY_FILE, index=False)
+
+    print(f"Historikuppdatering: {len(new_rows)} nya färdigspelade matcher")
+    return len(new_rows)
 
 
 def weighted_mean(values, weights):
@@ -246,6 +331,12 @@ def model_fixture(home, away, team_history, league_home_goals, league_away_goals
 
 def main():
     api_key = read_api_key()
+
+    # Uppdatera först resultatdelen av historiken utan att belasta OddsPapi.
+    new_history_matches = update_history_from_football_data()
+
+    # Modellen läser därefter den uppdaterade filen, så nya matcher påverkar
+    # senaste form och 2026 års ligamiljö direkt i samma körning.
     history_df = load_history()
     team_history = build_team_history(history_df)
 
@@ -305,7 +396,7 @@ def main():
                 "home_team": api_home,
                 "away_team": api_away,
                 "expected_goals": modeled["expected_goals"],
-                "p_over25": p_over,
+                "p_over25": p_over * 100,
                 "model_zone": in_model_zone,
                 "min_playable_odds": MIN_PLAYABLE_ODDS if in_model_zone else np.nan,
                 "best_over25_odds": best_odds,
@@ -327,7 +418,8 @@ def main():
 
     print("\nALLSVENSKAN O/U 2.5 V1 – LIVE")
     print("=" * 100)
-    print("API-budgetläge: Bet365 only (2 API-anrop per full körning)")
+    print("API-budgetläge: Bet365 only (2 OddsPapi-anrop per full körning)")
+    print(f"Nya historikmatcher denna körning: {new_history_matches}")
 
     if result.empty:
         print("Inga matcher kunde modelleras.")
@@ -345,7 +437,6 @@ def main():
                 "decision",
             ]
         ].copy()
-        display["p_over25"] *= 100
         print(display.round(3).to_string(index=False))
 
     print("\nV1-regel: P(Over) 55–60 % och Bet365-odds >= 1.85 => SPELA")
