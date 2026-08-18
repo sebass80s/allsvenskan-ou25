@@ -1,0 +1,11 @@
+venv/
+.env
+.DS_Store
+__pycache__/
+*.pyc
+
+# Local/raw/generated data
+data/*.csv
+!data/.gitkeep
+
+.streamlit/secrets.toml
