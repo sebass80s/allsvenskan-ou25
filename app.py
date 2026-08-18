@@ -87,7 +87,9 @@ def prepare_table(data: pd.DataFrame) -> pd.DataFrame:
     out["Datum"] = out["Kickoff"].dt.strftime("%d/%m %H:%M")
     out["Modell Over %"] = out["p_over25"]
     out["Förv. mål"] = out["expected_goals"]
-    out["Spela från"] = out["min_playable_odds"]
+    out["Spela från"] = out["min_playable_odds"].apply(
+        lambda value: f"{value:.2f}" if pd.notna(value) else "Ej spelzon"
+    )
     out["Bet365 odds"] = out["best_over25_odds"]
     out["Bookmaker"] = out["best_bookmaker"].fillna("—")
     out["Beslut"] = out["decision"].map({
@@ -106,7 +108,7 @@ def prepare_table(data: pd.DataFrame) -> pd.DataFrame:
 column_config = {
     "Modell Over %": st.column_config.NumberColumn(format="%.1f%%"),
     "Förv. mål": st.column_config.NumberColumn(format="%.2f"),
-    "Spela från": st.column_config.NumberColumn(format="%.2f"),
+    "Spela från": st.column_config.TextColumn(),
     "Bet365 odds": st.column_config.NumberColumn(format="%.2f"),
 }
 
