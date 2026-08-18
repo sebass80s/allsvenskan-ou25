@@ -12,7 +12,9 @@ OUTPUT_FILE = PROJECT_ROOT / "data" / "allsvenskan_live_ou25.csv"
 ENV_FILE = PROJECT_ROOT / ".env"
 
 TOURNAMENT_ID = 40
-BOOKMAKERS = ["pinnacle", "bet365", "unibet", "betway"]
+# API-budgetläge: använd bara Bet365 i den normala livekörningen.
+# Det ger 2 API-anrop per körning totalt: 1 fixtures + 1 odds.
+BOOKMAKERS = ["bet365"]
 MARKET_OU25 = "1010"
 
 MODEL_MIN = 0.55
@@ -325,6 +327,7 @@ def main():
 
     print("\nALLSVENSKAN O/U 2.5 V1 – LIVE")
     print("=" * 100)
+    print("API-budgetläge: Bet365 only (2 API-anrop per full körning)")
 
     if result.empty:
         print("Inga matcher kunde modelleras.")
@@ -345,7 +348,7 @@ def main():
         display["p_over25"] *= 100
         print(display.round(3).to_string(index=False))
 
-    print("\nV1-regel: P(Over) 55–60 % och bästa odds >= 1.85 => SPELA")
+    print("\nV1-regel: P(Over) 55–60 % och Bet365-odds >= 1.85 => SPELA")
     print("Sparad:", OUTPUT_FILE)
 
 
