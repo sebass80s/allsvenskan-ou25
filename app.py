@@ -83,6 +83,15 @@ c4.metric("🔵 Saknar odds", len(missing))
 
 def prepare_table(data: pd.DataFrame) -> pd.DataFrame:
     out = data.copy()
+
+    # Sortera på det numeriska speloddset innan texten skapas.
+    # Matcher med ett definierat spelodds hamnar först; NaN (= Ej spelzon) sist.
+    out = out.sort_values(
+        by=["min_playable_odds", "Kickoff"],
+        ascending=[True, True],
+        na_position="last",
+    )
+
     out["Match"] = out["home_team"] + " – " + out["away_team"]
     out["Datum"] = out["Kickoff"].dt.strftime("%d/%m %H:%M")
     out["Modell Over %"] = out["p_over25"]
