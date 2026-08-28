@@ -10,6 +10,8 @@ SUMMARY_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_summary.csv"
 CALIBRATION_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_calibration.csv"
 MONTHLY_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_monthly.csv"
 MISSING_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_missing.csv"
+MATURITY_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_maturity.csv"
+MATURITY_CUMULATIVE_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_maturity_cumulative.csv"
 
 MODEL_MIN = 0.55
 MODEL_MAX = 0.60
@@ -81,6 +83,22 @@ def brier_skill(brier, baseline_brier):
     return 1.0 - brier / baseline_brier
 
 
+def evaluate_slice(data):
+    if data.empty:
+        return {"matches": 0, "mean_prediction": np.nan, "actual_over_rate": np.nan, "brier": np.nan, "baseline_brier": np.nan, "brier_skill_score": np.nan}
+    actual_rate = data["actual_over25"].mean()
+    baseline_brier = float(np.mean((actual_rate - data["actual_over25"]) ** 2))
+    brier = data["brier"].mean()
+    return {
+        "matches": len(data),
+        "mean_prediction": data["p_over25"].mean(),
+        "actual_over_rate": actual_rate,
+        "brier": brier,
+        "baseline_brier": baseline_brier,
+        "brier_skill_score": brier_skill(brier, baseline_brier),
+    }
+
+
 def main():
     if not HISTORY_FILE.exists():
         raise RuntimeError(f"Saknar historikfilen {HISTORY_FILE}")
@@ -97,27 +115,43 @@ def main():
     df = df.sort_values("datetime").reset_index(drop=True)
 
     team_history, prior_home, prior_away, rows, missing = {}, [], [], [], []
+    season_2026_games = {}
+
     for _, match in df.iterrows():
         season, home, away = int(match["Season"]), str(match["Home"]), str(match["Away"])
         hg, ag = float(match["HG"]), float(match["AG"])
         if season == 2026:
+            home_match_no = season_2026_games.get(home, 0) + 1
+            away_match_no = season_2026_games.get(away, 0) + 1
+            min_match_no = min(home_match_no, away_match_no)
             league_ready = bool(prior_home and prior_away)
             modeled = None
             if league_ready:
                 modeled = predict(home, away, team_history, float(np.mean(prior_home)), float(np.mean(prior_away)))
             if modeled is None:
-                missing.append({"date": match["datetime"].date().isoformat(), "home_team": home, "away_team": away, "reason": missing_reason(home, away, team_history, league_ready)})
+                missing.append({
+                    "date": match["datetime"].date().isoformat(), "home_team": home, "away_team": away,
+                    "home_2026_match_no": home_match_no, "away_2026_match_no": away_match_no,
+                    "reason": missing_reason(home, away, team_history, league_ready)
+                })
             else:
                 expected_goals, p_over = modeled
                 actual = int(hg + ag >= 3)
-                rows.append({"date": match["datetime"].date().isoformat(), "home_team": home, "away_team": away, "expected_goals": expected_goals, "p_over25": p_over, "in_model_zone": MODEL_MIN <= p_over < MODEL_MAX, "actual_over25": actual, "total_goals": int(hg + ag), "brier": (p_over - actual) ** 2})
+                rows.append({
+                    "date": match["datetime"].date().isoformat(), "home_team": home, "away_team": away,
+                    "home_2026_match_no": home_match_no, "away_2026_match_no": away_match_no, "min_2026_match_no": min_match_no,
+                    "expected_goals": expected_goals, "p_over25": p_over, "in_model_zone": MODEL_MIN <= p_over < MODEL_MAX,
+                    "actual_over25": actual, "total_goals": int(hg + ag), "brier": (p_over - actual) ** 2
+                })
         team_history.setdefault(home, []).append({"gf": hg, "ga": ag, "venue": "H"})
         team_history.setdefault(away, []).append({"gf": ag, "ga": hg, "venue": "A"})
         if season == 2026:
             prior_home.append(hg); prior_away.append(ag)
+            season_2026_games[home] = season_2026_games.get(home, 0) + 1
+            season_2026_games[away] = season_2026_games.get(away, 0) + 1
 
     detail = pd.DataFrame(rows)
-    missing_df = pd.DataFrame(missing, columns=["date", "home_team", "away_team", "reason"])
+    missing_df = pd.DataFrame(missing, columns=["date", "home_team", "away_team", "home_2026_match_no", "away_2026_match_no", "reason"])
     DETAIL_FILE.parent.mkdir(parents=True, exist_ok=True)
     detail.to_csv(DETAIL_FILE, index=False)
     missing_df.to_csv(MISSING_FILE, index=False)
@@ -125,30 +159,46 @@ def main():
     if detail.empty:
         calibration = pd.DataFrame(columns=["probability_band", "matches", "mean_prediction", "actual_over_rate", "brier"])
         monthly = pd.DataFrame(columns=["month", "matches", "mean_prediction", "actual_over_rate", "brier"])
+        maturity = pd.DataFrame(columns=["maturity_band", "matches", "mean_prediction", "actual_over_rate", "brier", "baseline_brier", "brier_skill_score"])
+        cumulative = pd.DataFrame(columns=["minimum_team_match_no", "matches", "mean_prediction", "actual_over_rate", "brier", "baseline_brier", "brier_skill_score"])
         summary = pd.DataFrame([{"scored_matches": 0, "missing_matches": len(missing_df)}])
     else:
-        actual_rate = detail["actual_over25"].mean()
-        baseline_brier = float(np.mean((actual_rate - detail["actual_over25"]) ** 2))
-        overall_brier = detail["brier"].mean()
+        overall = evaluate_slice(detail)
         zone = detail[detail["in_model_zone"]].copy()
-        zone_rate = zone["actual_over25"].mean() if len(zone) else np.nan
-        zone_baseline = float(np.mean((zone_rate - zone["actual_over25"]) ** 2)) if len(zone) else np.nan
-        zone_brier = zone["brier"].mean() if len(zone) else np.nan
+        zone_metrics = evaluate_slice(zone)
         summary = pd.DataFrame([{
             "scored_matches": len(detail), "missing_matches": len(missing_df), "zone_matches": len(zone),
-            "overall_actual_over_rate": actual_rate, "overall_mean_prediction": detail["p_over25"].mean(),
-            "overall_brier": overall_brier, "baseline_brier": baseline_brier, "brier_skill_score": brier_skill(overall_brier, baseline_brier),
-            "zone_actual_over_rate": zone_rate, "zone_mean_prediction": zone["p_over25"].mean() if len(zone) else np.nan,
-            "zone_brier": zone_brier, "zone_baseline_brier": zone_baseline, "zone_brier_skill_score": brier_skill(zone_brier, zone_baseline),
+            "overall_actual_over_rate": overall["actual_over_rate"], "overall_mean_prediction": overall["mean_prediction"],
+            "overall_brier": overall["brier"], "baseline_brier": overall["baseline_brier"], "brier_skill_score": overall["brier_skill_score"],
+            "zone_actual_over_rate": zone_metrics["actual_over_rate"], "zone_mean_prediction": zone_metrics["mean_prediction"],
+            "zone_brier": zone_metrics["brier"], "zone_baseline_brier": zone_metrics["baseline_brier"], "zone_brier_skill_score": zone_metrics["brier_skill_score"],
         }])
-        detail["probability_band"] = pd.cut(detail["p_over25"], bins=[-np.inf, .50, .55, .60, .65, np.inf], labels=["<50%", "50–55%", "55–60%", "60–65%", "65%+"] , right=False)
+
+        detail["probability_band"] = pd.cut(detail["p_over25"], bins=[-np.inf, .50, .55, .60, .65, np.inf], labels=["<50%", "50–55%", "55–60%", "60–65%", "65%+"], right=False)
         calibration = detail.groupby("probability_band", observed=False).agg(matches=("actual_over25", "size"), mean_prediction=("p_over25", "mean"), actual_over_rate=("actual_over25", "mean"), brier=("brier", "mean")).reset_index()
+
         detail["month"] = pd.to_datetime(detail["date"]).dt.to_period("M").astype(str)
         monthly = detail.groupby("month").agg(matches=("actual_over25", "size"), mean_prediction=("p_over25", "mean"), actual_over_rate=("actual_over25", "mean"), brier=("brier", "mean")).reset_index()
+
+        detail["maturity_band"] = pd.cut(detail["min_2026_match_no"], bins=[0, 5, 10, 15, np.inf], labels=["1–5", "6–10", "11–15", "16+"], right=True)
+        maturity_rows = []
+        for band, group in detail.groupby("maturity_band", observed=False):
+            metrics = evaluate_slice(group)
+            maturity_rows.append({"maturity_band": str(band), **metrics})
+        maturity = pd.DataFrame(maturity_rows)
+
+        cumulative_rows = []
+        for threshold in [1, 6, 11, 16]:
+            group = detail[detail["min_2026_match_no"] >= threshold]
+            metrics = evaluate_slice(group)
+            cumulative_rows.append({"minimum_team_match_no": threshold, **metrics})
+        cumulative = pd.DataFrame(cumulative_rows)
 
     summary.to_csv(SUMMARY_FILE, index=False)
     calibration.to_csv(CALIBRATION_FILE, index=False)
     monthly.to_csv(MONTHLY_FILE, index=False)
+    maturity.to_csv(MATURITY_FILE, index=False)
+    cumulative.to_csv(MATURITY_CUMULATIVE_FILE, index=False)
 
     row = summary.iloc[0]
     print("ALLSVENSKAN V1 WALK-FORWARD BACKTEST")
@@ -168,6 +218,10 @@ def main():
         print(calibration.to_string(index=False))
         print("\nMånadsvis")
         print(monthly.to_string(index=False))
+        print("\nSäsongsmognad, grupperat efter det minst erfarna lagets 2026-matchnummer")
+        print(maturity.to_string(index=False))
+        print("\nKumulativ cold-start-analys")
+        print(cumulative.to_string(index=False))
     if len(missing_df):
         print("\nMatcher utan prediktion")
         print(missing_df.to_string(index=False))
