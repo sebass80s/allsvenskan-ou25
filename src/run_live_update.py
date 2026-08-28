@@ -6,6 +6,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = [
     PROJECT_ROOT / "src" / "live_ou25_v1.py",
     PROJECT_ROOT / "src" / "forward_test_log.py",
+    PROJECT_ROOT / "src" / "live_v2_candidate_b.py",
+    PROJECT_ROOT / "src" / "v2_forward_test_log.py",
 ]
 
 
