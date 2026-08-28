@@ -1,24 +1,36 @@
-# Allsvenskan O/U 2.5 V1
+# Allsvenskan O/U 2.5
 
-Separat forward-test för Allsvenskan, fristående från Premier League-projektet.
+Separat Allsvenskan-projekt, fristående från Premier League-projektet.
 
-## V1-regel
+## V1, fryst forward-test
 
 Modellen uppskattar sannolikheten för **Over 2.5 mål** från aktuell målform, hemma/borta-form och ligans aktuella målmiljö.
 
 En match är endast en V1-kandidat när modellens råa `P(Over 2.5)` ligger i intervallet **55–60 %**.
 
-- **SPELA** om bästa tillgängliga Over 2.5-odds är **>= 1.85**
+- **SPELA** om Bet365 Over 2.5 är **>= 1.85**
 - **VÄNTA** om matchen är i modellzonen men oddset är lägre än 1.85
 - **INGET SPEL** om modellens sannolikhet ligger utanför 55–60 %
 
-Regeln är fryst för forward-testet och ska inte ändras efter enstaka resultat.
+V1-regeln och dess gamla forward-logg är frysta.
 
-## Datakällor
+## V2-B, separat kandidat
 
-- Historisk Allsvenskan-data lokalt i `data/allsvenskan_raw.csv` (2024–2026 används av V1)
-- Live fixtures och odds via OddsPapi, tournament ID `40`
-- Bookmakers: Pinnacle, Bet365, Unibet och Betway
+Historisk walk-forward-diagnostik 2024–2026 visade ett stabilt cold-start-problem i V1. V2 Candidate B ändrar därför **inte sannolikhetsmodellen**. Den lägger bara till en mognadsregel:
+
+> Ingen V2-B-signal innan båda lagen är framme vid sin sjätte ligamatch för säsongen.
+
+Därefter används exakt V1-sannolikhet, samma 55–60 %-zon och samma oddsgräns 1.85.
+
+V2-B har egen livefil och egen forward-logg. Gamla V1-signaler rekonstrueras inte retroaktivt.
+
+## Datakällor och API-budget
+
+- Historik: `data/allsvenskan_raw.csv`
+- Färska resultat: Football-Data Sweden CSV, 0 OddsPapi-anrop
+- Live fixtures och odds: OddsPapi tournament ID `40`
+- Normalt live-budgetläge: **Bet365 endast**, cirka **2 OddsPapi-anrop per manuell uppdatering**
+- Streamlit-sidorna läser lokala filer och gör i sig 0 API-anrop
 
 ## Installation
 
@@ -40,20 +52,31 @@ Lägg historikfilen i:
 data/allsvenskan_raw.csv
 ```
 
-## Kör liveanalys
-
-```bash
-python3 src/live_ou25_v1.py
-```
-
-Resultatet sparas till:
-
-```text
-data/allsvenskan_live_ou25.csv
-```
-
 ## Starta dashboard
 
 ```bash
 streamlit run app.py
 ```
+
+Den vanliga knappen **Uppdatera odds** kör hela livekedjan:
+
+1. V1 live + resultat
+2. V1 forward-logg
+3. V2-B cold-start-overlay, 0 extra API-anrop
+4. separat V2-B forward-logg
+5. invariant-audit som stoppar körningen om V2-B bryter sin frysta regel
+
+## Viktiga filer
+
+- `src/live_ou25_v1.py` – fryst V1 live
+- `src/forward_test_log.py` – fryst V1 forward-logg
+- `src/live_v2_candidate_b.py` – V2-B live-overlay
+- `src/v2_forward_test_log.py` – separat V2-B forward-logg
+- `src/v2_invariant_audit.py` – säkerhetskontroll
+- `src/v2_cross_season_cold_start.py` – historisk cold-start-validering
+- `src/v2_b_zone_validation.py` – validering specifikt i 55–60 %-zonen
+- `pages/3_V2_B_forward.py` – separat V2-B-dashboard
+
+## Forskningsprincip
+
+V1 ska inte justeras efter enskilda utfall. V2-idéer testas separat och får bara flyttas till forward-test efter walk-forward-validering. Historiska kval/playoff-rader exkluderas i den rena cross-season-diagnostiken utan att råfilen skrivs om.
