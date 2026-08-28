@@ -10,6 +10,8 @@ SCRIPTS=[
     "v2_cold_start_thresholds.py",
     "v2_cross_season_cold_start.py",
     "v2_b_zone_validation.py",
+    "historical_ou25_odds_audit.py",
+    "v2_b_historical_odds_backtest.py",
     "v2_candidate_a.py",
 ]
 
