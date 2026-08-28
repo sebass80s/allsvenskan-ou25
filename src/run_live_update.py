@@ -8,6 +8,7 @@ SCRIPTS = [
     PROJECT_ROOT / "src" / "forward_test_log.py",
     PROJECT_ROOT / "src" / "live_v2_candidate_b.py",
     PROJECT_ROOT / "src" / "v2_forward_test_log.py",
+    PROJECT_ROOT / "src" / "v2_invariant_audit.py",
 ]
 
 
