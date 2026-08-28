@@ -15,6 +15,8 @@ DETAIL_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_v1.csv"
 CALIBRATION_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_calibration.csv"
 MONTHLY_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_monthly.csv"
 MISSING_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_missing.csv"
+MATURITY_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_maturity.csv"
+MATURITY_CUMULATIVE_FILE = PROJECT_ROOT / "data" / "allsvenskan_backtest_maturity_cumulative.csv"
 
 st.set_page_config(page_title="Offline-kontroller", page_icon="🧪", layout="wide")
 st.title("🧪 Offline-kontroller")
@@ -62,10 +64,31 @@ if BACKTEST_FILE.exists():
         st.dataframe(monthly.rename(columns={"month":"Månad","matches":"Matcher","mean_prediction":"Snittpred. %","actual_over_rate":"Faktisk Over %","brier":"Brier"}), use_container_width=True, hide_index=True)
         st.line_chart(monthly.set_index("month")[["mean_prediction","actual_over_rate"]].rename(columns={"mean_prediction":"Modell","actual_over_rate":"Utfall"}))
 
+    if MATURITY_FILE.exists():
+        st.markdown("#### Cold start: säsongsmognad")
+        st.caption("Grupperingen använder det lägsta av hemma- och bortalagets 2026-matchnummer. En match i gruppen 6–10 innebär alltså att båda lagen minst är framme vid match 6.")
+        maturity=pd.read_csv(MATURITY_FILE)
+        for col in ["mean_prediction","actual_over_rate","brier_skill_score"]:
+            maturity[col]=pd.to_numeric(maturity[col], errors="coerce")
+        maturity_display=maturity.copy(); maturity_display["mean_prediction"]*=100; maturity_display["actual_over_rate"]*=100; maturity_display["brier_skill_score"]*=100
+        st.dataframe(maturity_display.rename(columns={"maturity_band":"Minsta lag-matchnr","matches":"Matcher","mean_prediction":"Snittpred. %","actual_over_rate":"Faktisk Over %","brier":"Brier","baseline_brier":"Baslinje Brier","brier_skill_score":"Skill %"}), use_container_width=True, hide_index=True, column_config={"Snittpred. %":st.column_config.NumberColumn(format="%.1f%%"),"Faktisk Over %":st.column_config.NumberColumn(format="%.1f%%"),"Brier":st.column_config.NumberColumn(format="%.4f"),"Baslinje Brier":st.column_config.NumberColumn(format="%.4f"),"Skill %":st.column_config.NumberColumn(format="%+.2f%%")})
+        st.bar_chart(maturity_display.set_index("maturity_band")[["brier_skill_score"]].rename(columns={"brier_skill_score":"Brier skill %"}))
+
+    if MATURITY_CUMULATIVE_FILE.exists():
+        st.markdown("#### Cold start: kumulativt")
+        st.caption("Här testar vi om modellen blir bättre när tidiga omgångar tas bort, utan att ändra någon modellparameter.")
+        cumulative=pd.read_csv(MATURITY_CUMULATIVE_FILE)
+        for col in ["mean_prediction","actual_over_rate","brier_skill_score"]:
+            cumulative[col]=pd.to_numeric(cumulative[col], errors="coerce")
+        cumulative_display=cumulative.copy(); cumulative_display["mean_prediction"]*=100; cumulative_display["actual_over_rate"]*=100; cumulative_display["brier_skill_score"]*=100
+        cumulative_display["Urval"] = cumulative_display["minimum_team_match_no"].map(lambda x: "Alla" if int(x)==1 else f"Från lagens match {int(x)}")
+        st.dataframe(cumulative_display[["Urval","matches","mean_prediction","actual_over_rate","brier","baseline_brier","brier_skill_score"]].rename(columns={"matches":"Matcher","mean_prediction":"Snittpred. %","actual_over_rate":"Faktisk Over %","brier":"Brier","baseline_brier":"Baslinje Brier","brier_skill_score":"Skill %"}), use_container_width=True, hide_index=True, column_config={"Snittpred. %":st.column_config.NumberColumn(format="%.1f%%"),"Faktisk Over %":st.column_config.NumberColumn(format="%.1f%%"),"Brier":st.column_config.NumberColumn(format="%.4f"),"Baslinje Brier":st.column_config.NumberColumn(format="%.4f"),"Skill %":st.column_config.NumberColumn(format="%+.2f%%")})
+        st.line_chart(cumulative_display.set_index("Urval")[["brier_skill_score"]].rename(columns={"brier_skill_score":"Brier skill %"}))
+
     if MISSING_FILE.exists():
         missing=pd.read_csv(MISSING_FILE)
         st.markdown(f"#### Matcher utan prediktion ({len(missing)})")
-        if len(missing): st.dataframe(missing.rename(columns={"date":"Datum","home_team":"Hemma","away_team":"Borta","reason":"Orsak"}), use_container_width=True, hide_index=True)
+        if len(missing): st.dataframe(missing.rename(columns={"date":"Datum","home_team":"Hemma","away_team":"Borta","home_2026_match_no":"Hemma matchnr","away_2026_match_no":"Borta matchnr","reason":"Orsak"}), use_container_width=True, hide_index=True)
         else: st.caption("Alla 2026-matcher fick en prediktion.")
 
     if DETAIL_FILE.exists():
