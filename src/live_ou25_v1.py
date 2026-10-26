@@ -1,4 +1,5 @@
 import time
+import os
 from io import StringIO
 from pathlib import Path
 
@@ -46,6 +47,9 @@ NAME_MAP = {
 
 
 def read_api_key() -> str:
+    env_key = os.environ.get('ODDSPAPI_API_KEY', '').strip()
+    if env_key:
+        return env_key
     if not ENV_FILE.exists():
         raise RuntimeError(
             "Saknar .env. Skapa filen i projektroten med "
