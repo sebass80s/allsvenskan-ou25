@@ -1,0 +1,2 @@
+record_id,record_type,counts_for_v2_b,logged_at,fixture_id,start_time,home_team,away_team,home_2026_match_no,away_2026_match_no,min_2026_match_no,p_over25,expected_goals,threshold_odds,observed_odds,bookmaker,status,home_goals,away_goals,total_goals,won,profit
+id1000004067126850:BET,BET,True,2026-10-26T19:14:47+00:00,id1000004067126850,2026-10-29 18:00:00+00:00,Kalmar FF,GAIS,25,25,25,56.430251206200374,2.944680555555556,1.85,1.92,bet365,OPEN,,,,,
