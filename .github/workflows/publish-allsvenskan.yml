@@ -1,0 +1,35 @@
+name: Publish Allsvenskan O/U
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '53 8 * * *'
+permissions:
+  contents: write
+concurrency:
+  group: allsvenskan-forward
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Check historical dataset
+        run: |
+          test -s data/allsvenskan_raw.csv || { echo "::error::Missing data/allsvenskan_raw.csv. Upload the existing historical CSV to this repository before enabling automatic signals."; exit 1; }
+      - name: Run frozen V1 and V2-B pipelines
+        env:
+          ODDSPAPI_API_KEY: ${{ secrets.ODDSPAPI_API_KEY }}
+        run: python src/run_live_update.py
+      - name: Publish public non-secret CSV exports
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/allsvenskan_live_ou25.csv data/allsvenskan_live_v2_b.csv data/allsvenskan_forward_log.csv data/allsvenskan_v2_b_forward_log.csv
+          if ! git diff --cached --quiet; then
+            git commit -m "data: publish Allsvenskan O/U live and forward test"
+            git push
+          fi
